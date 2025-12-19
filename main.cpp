@@ -60,10 +60,13 @@ int main(int argc, char* argv[]) {
     while (inputFile.read(buffer, BUFFER_SIZE)) {
         outputFile.write(buffer, inputFile.gcount());
     }
-    // Write remaining bytes
+    // ... writing loop ...
     if (inputFile.gcount() > 0) {
         outputFile.write(buffer, inputFile.gcount());
     }
+
+    // FIX: Close the file to flush the buffer to disk
+    outputFile.close(); 
 
     std::cout << "Successfully wrote to " << outputPath << std::endl;
     std::cout << "Header size: " << sizeof(header) << " bytes" << std::endl;
@@ -71,3 +74,4 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+

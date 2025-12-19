@@ -1,5 +1,7 @@
 #ifndef WAVELET_H
 #define WAVELET_H
+#include <string>   
+#include <cstdint>
 
 #include <vector>
 
@@ -22,5 +24,15 @@ void transform2D(GrayImage& img);
 
 // Inverse Haar 2D transform
 void inverseTransform2D(GrayImage& img);
+
+// PGM File Helpers
+bool loadPGM(const std::string& path, GrayImage& img);
+bool savePGM(const std::string& path, const GrayImage& img);
+
+// Saliency filter: Nullifies coefficients outside a central radius
+void applySaliency(GrayImage& img, float radius);
+
+// Quantization: Bridges float coefficients to byte-based Huffman encoding
+std::vector<uint8_t> quantize(const GrayImage& img, float scale = 10.0f);
 
 #endif // WAVELET_H

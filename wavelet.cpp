@@ -1,5 +1,9 @@
 #include "wavelet.h"
 #include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <cmath>
 
 void haar1D(std::vector<float>& line, int size) {
     if (size < 2) return;
@@ -96,4 +100,74 @@ void inverseTransform2D(GrayImage& img) {
             img.data[y * img.width + x] = row[x];
         }
     }
+}
+
+bool loadPGM(const std::string& path, GrayImage& img) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+
+    std::string format;
+    int maxVal;
+    file >> format >> img.width >> img.height >> maxVal;
+    
+    // Skip single whitespace after maxVal
+    file.ignore(1);
+
+    if (format != "P5") return false;
+
+    img.data.assign(img.width * img.height, 0.0f);
+    std::vector<uint8_t> buffer(img.width * img.height);
+    file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+
+    for (size_t i = 0; i < buffer.size(); ++i) {
+        img.data[i] = static_cast<float>(buffer[i]);
+    }
+    return true;
+}
+
+bool savePGM(const std::string& path, const GrayImage& img) {
+    std::ofstream file(path, std::ios::binary);
+    if (!file) return false;
+
+    file << "P5\n" << img.width << " " << img.height << "\n255\n";
+
+    std::vector<uint8_t> buffer(img.width * img.height);
+    for (size_t i = 0; i < img.data.size(); ++i) {
+        float val = std::clamp(img.data[i], 0.0f, 255.0f);
+        buffer[i] = static_cast<uint8_t>(val);
+    }
+    file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+    return true;
+}
+
+void applySaliency(GrayImage& img, float radius) {
+    float cx = img.width / 2.0f;
+    float cy = img.height / 2.0f;
+
+    for (int y = 0; y < img.height; ++y) {
+        for (int x = 0; x < img.width; ++x) {
+            float dx = x - cx;
+            float dy = y - cy;
+            float dist = std::sqrt(dx * dx + dy * dy);
+
+            if (dist > radius) {
+                img.data[y * img.width + x] = 0.0f;
+            }
+        }
+    }
+}
+
+std::vector<uint8_t> quantize(const GrayImage& img, float scale) {
+    std::vector<uint8_t> output;
+    output.reserve(img.data.size());
+
+    for (float val : img.data) {
+        // Quantization: Scale and shift to [0, 255] for uint8_t
+        // Original values are roughly centered around 0 after transform
+        // int8 range [-128, 127] -> add 128 to get [0, 255]
+        int quantized = static_cast<int>(std::round(val * scale));
+        int clamped = std::clamp(quantized, -128, 127);
+        output.push_back(static_cast<uint8_t>(clamped + 128));
+    }
+    return output;
 }

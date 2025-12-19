@@ -18,9 +18,10 @@ __attribute__((packed))
 #endif
 QuasarHeader {
     char magic[4];          // 'Q', 'S', 'R', '1'
-    uint8_t file_type;      // 0=Binary, 1=Text, etc.
+    uint8_t file_type;      // 0=Binary, 1=Text, 2=PGM, etc.
     uint64_t original_size; // Original file size in bytes
-    uint8_t compression_flags; // 0=None, 1=Zlib, etc.
+    uint8_t compression_flags; // Bit 0: Huffman, Bit 1: Wavelet, Bit 7: Encrypted
+    uint8_t nonce[12];      // 96-bit Nonce for ChaCha20
 };
 
 #ifdef _MSC_VER

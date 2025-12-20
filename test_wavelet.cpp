@@ -6,9 +6,9 @@
 
 void printImage(const GrayImage& img, const std::string& label) {
     std::cout << "--- " << label << " ---" << std::endl;
-    for (int y = 0; y < img.height; ++y) {
-        for (int x = 0; x < img.width; ++x) {
-            std::cout << std::fixed << std::setprecision(1) << std::setw(6) << img.data[y * img.width + x] << " ";
+    for (int y = 0; y < std::min(8, img.height); ++y) {
+        for (int x = 0; x < std::min(8, img.width); ++x) {
+            std::cout << std::fixed << std::setprecision(4) << std::setw(8) << img.data[y * img.width + x] << " ";
         }
         std::cout << std::endl;
     }
@@ -16,39 +16,47 @@ void printImage(const GrayImage& img, const std::string& label) {
 
 int main() {
     const int N = 8;
+    const float scale = 1000.0f;
     GrayImage img(N, N);
 
     // Fill with some pattern
     for (int y = 0; y < N; ++y) {
         for (int x = 0; x < N; ++x) {
-            img.data[y * N + x] = static_cast<float>(y * 10 + x);
+            img.data[y * N + x] = static_cast<float>(y * 10.1234f + x * 0.5678f);
         }
     }
 
     GrayImage original = img;
-    printImage(img, "Original Image");
+    std::cout << "Testing 32-bit High Precision Quantization with scale: " << scale << std::endl;
+    printImage(img, "Original Image (top 8x8)");
 
-    // Forward Transform
+    // 1. Transform
     transform2D(img);
-    printImage(img, "Wavelet Coefficients");
 
-    // Inverse Transform
-    inverseTransform2D(img);
-    printImage(img, "Reconstructed Image");
+    // 2. Quantize/Dequantize bridge
+    auto quantized = quantize(img, scale);
+    std::cout << "Quantized size: " << quantized.size() << " bytes (4 per pixel)" << std::endl;
+    
+    GrayImage reconstructed(N, N);
+    dequantize(quantized, reconstructed, scale);
 
-    // Verification
-    bool match = true;
+    // 3. Inverse Transform
+    inverseTransform2D(reconstructed);
+    printImage(reconstructed, "Reconstructed Image (top 8x8)");
+
+    // 4. Verification
+    float maxError = 0.0f;
     for (int i = 0; i < N * N; ++i) {
-        if (std::abs(img.data[i] - original.data[i]) > 0.001f) {
-            match = false;
-            break;
-        }
+        float error = std::abs(reconstructed.data[i] - original.data[i]);
+        if (error > maxError) maxError = error;
     }
 
-    if (match) {
-        std::cout << "\nRESULT: Implementation SUCCESSFUL (Perfect Reconstruction)!" << std::endl;
+    std::cout << "Maximum Reconstruction Error: " << maxError << std::endl;
+    
+    if (maxError < 0.001f) {
+        std::cout << "RESULT: 16-bit High Precision Quantization SUCCESSFUL!" << std::endl;
     } else {
-        std::cout << "\nRESULT: Implementation FAILED (Data Mismatch)!" << std::endl;
+        std::cout << "RESULT: FAILED (Error too high)" << std::endl;
     }
 
     return 0;

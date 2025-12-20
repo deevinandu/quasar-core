@@ -22,6 +22,9 @@ QuasarHeader {
     uint64_t original_size; // Original file size in bytes
     uint8_t compression_flags; // Bit 0: Huffman, Bit 1: Wavelet, Bit 7: Encrypted
     uint8_t nonce[12];      // 96-bit Nonce for ChaCha20
+    float scale;            // Quantization scale factor
+    uint16_t width;   
+    uint16_t height; 
 };
 
 #ifdef _MSC_VER

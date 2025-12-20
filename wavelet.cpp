@@ -159,15 +159,41 @@ void applySaliency(GrayImage& img, float radius) {
 
 std::vector<uint8_t> quantize(const GrayImage& img, float scale) {
     std::vector<uint8_t> output;
-    output.reserve(img.data.size());
+    // Reserve 4 bytes per pixel
+    output.reserve(img.data.size() * 4);
 
     for (float val : img.data) {
-        // Quantization: Scale and shift to [0, 255] for uint8_t
-        // Original values are roughly centered around 0 after transform
-        // int8 range [-128, 127] -> add 128 to get [0, 255]
-        int quantized = static_cast<int>(std::round(val * scale));
-        int clamped = std::clamp(quantized, -128, 127);
-        output.push_back(static_cast<uint8_t>(clamped + 128));
+        // Upgrade to 32-bit integer to prevent overflow at high scales
+        int32_t quantized = static_cast<int32_t>(std::round(val * scale));
+        
+        // Split into 4 bytes (Big-Endian)
+        output.push_back(static_cast<uint8_t>((quantized >> 24) & 0xFF));
+        output.push_back(static_cast<uint8_t>((quantized >> 16) & 0xFF));
+        output.push_back(static_cast<uint8_t>((quantized >> 8) & 0xFF));
+        output.push_back(static_cast<uint8_t>(quantized & 0xFF));
     }
     return output;
+}
+
+void dequantize(const std::vector<uint8_t>& data, GrayImage& img, float scale) {
+    // We assume the image dimensions are already set in 'img'
+    img.data.assign(img.width * img.height, 0.0f);
+    
+    for (size_t i = 0; i < img.data.size(); ++i) {
+        if (4 * i + 3 >= data.size()) break;
+
+        // Reassemble from 4 bytes
+        uint8_t b3 = data[4 * i];
+        uint8_t b2 = data[4 * i + 1];
+        uint8_t b1 = data[4 * i + 2];
+        uint8_t b0 = data[4 * i + 3];
+        
+        // Cast to uint32_t first to prevent sign extension issues during shift
+        int32_t val = (static_cast<uint32_t>(b3) << 24) |
+                      (static_cast<uint32_t>(b2) << 16) |
+                      (static_cast<uint32_t>(b1) << 8) |
+                      static_cast<uint32_t>(b0);
+                      
+        img.data[i] = static_cast<float>(val) / scale;
+    }
 }

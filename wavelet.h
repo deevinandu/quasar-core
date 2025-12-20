@@ -32,7 +32,10 @@ bool savePGM(const std::string& path, const GrayImage& img);
 // Saliency filter: Nullifies coefficients outside a central radius
 void applySaliency(GrayImage& img, float radius);
 
-// Quantization: Bridges float coefficients to byte-based Huffman encoding
-std::vector<uint8_t> quantize(const GrayImage& img, float scale = 10.0f);
+// Quantization: Bridges float coefficients to 16-bit bit-packed data
+std::vector<uint8_t> quantize(const GrayImage& img, float scale);
+
+// Dequantization: Reconstructs float coefficients from 16-bit data
+void dequantize(const std::vector<uint8_t>& data, GrayImage& img, float scale);
 
 #endif // WAVELET_H

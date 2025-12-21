@@ -7,16 +7,19 @@
 #include <cstring>
 #include <ctime>
 #include <thread>
+#include <string>
 
+// Quasar Core Modules
 #include "quasar_format.h"
 #include "huffman.h"
 #include "wavelet.h"
 #include "chacha.h"
-#include "udp_link.h" 
+#include "udp_link.h"
 
 namespace fs = std::filesystem;
 
 // --- Helper Functions ---
+
 void print_hex(const std::string& label, const uint8_t* data, size_t len) {
     std::cout << label << ": ";
     for (size_t i = 0; i < len; ++i) {
@@ -33,20 +36,27 @@ uint8_t hex_char_to_byte(char c) {
 }
 
 void parse_hex_key(const std::string& hex, uint8_t* key) {
+    // Safety: Pad with zeros if short
+    std::string safe_hex = hex;
+    while (safe_hex.length() < 64) safe_hex += "0";
+    
     for (size_t i = 0; i < 32; ++i) {
-        key[i] = (hex_char_to_byte(hex[2*i]) << 4) | hex_char_to_byte(hex[2*i+1]);
+        key[i] = (hex_char_to_byte(safe_hex[2*i]) << 4) | hex_char_to_byte(safe_hex[2*i+1]);
     }
 }
 
-// --- MAIN ---
+// --- MAIN EXECUTION ---
+
 int main(int argc, char* argv[]) {
+    // 1. Argument Parsing & Banner
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <input_file/port> [options...]\n"
+        std::cerr << "Usage: " << argv[0] << " <input/port> [options...]\n"
                   << "Options:\n"
-                  << "  --unpack              Restore a file from disk\n"
-                  << "  --tx <ip> <port>      Stream file to network\n"
+                  << "  --unpack              Restore a local file\n"
+                  << "  --tx <ip> <port>      Stream to network (UDP)\n"
                   << "  --rx <port>           Listen for network stream\n"
                   << "  --encrypt             Enable ChaCha20 security\n"
+                  << "  --key <hex_string>    Use Pre-Shared Key (Automated Mode)\n"
                   << "  --scale <float>       Precision scale (default 10.0)\n";
         return 1;
     }
@@ -61,12 +71,12 @@ int main(int argc, char* argv[]) {
     int tx_port = 0;
     int rx_port = 0;
 
-    // Settings
-    float radius = 1000.0f;
-    float scale = 10.0f; 
+    // Configuration
+    float radius = 1000.0f;     // Default: Keep everything
+    float scale = 10.0f;        // Default: Low precision
     bool do_encrypt = false;
+    std::string manual_key = ""; // Pre-Shared Key storage
 
-    // Argument Parsing
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--unpack") mode_unpack = true;
@@ -81,8 +91,9 @@ int main(int argc, char* argv[]) {
         }
         else if (arg == "--encrypt") do_encrypt = true;
         else if (arg == "--scale" && i + 1 < argc) scale = std::stof(argv[++i]);
-        else if (i > 1 && !mode_tx && !mode_rx) { 
-            // Only try parsing radius if it's not part of IP/Port args
+        else if (arg == "--key" && i + 1 < argc) manual_key = argv[++i];
+        else if (i > 1 && !mode_tx && !mode_rx && arg.find("--") == std::string::npos) { 
+            // Try parsing radius if it's a number
             try { radius = std::stof(arg); } catch (...) {} 
         }
     }
@@ -92,62 +103,64 @@ int main(int argc, char* argv[]) {
     // ==========================================
     if (mode_rx) {
         std::cout << "[Network] Listening on UDP Port " << rx_port << "..." << std::endl;
+        if (!manual_key.empty()) {
+            std::cout << "[Security] Using Pre-Shared Key (PSK)." << std::endl;
+        }
+
         QuasarRx rx;
         std::vector<uint8_t> frame;
         
-        // Loop forever (Server Mode)
+        // Server Loop
         while (rx.listen(rx_port, frame)) {
-            if (frame.size() < sizeof(QuasarHeader)) {
-                std::cerr << "[Rx] Error: Frame too small." << std::endl;
-                continue;
-            }
+            if (frame.size() < sizeof(QuasarHeader)) continue;
 
-            // Extract Header
+            // 1. Parse Header
             QuasarHeader header;
             std::memcpy(&header, frame.data(), sizeof(header));
 
             if (std::strncmp(header.magic, "QSR1", 4) != 0) {
-                std::cerr << "[Rx] Error: Invalid Magic Bytes." << std::endl;
+                std::cerr << "[Rx] Invalid Packet Magic." << std::endl;
                 continue;
             }
 
-            // Extract Payload
             std::vector<uint8_t> payload(frame.begin() + sizeof(header), frame.end());
-
-            std::cout << "[Rx] Received Frame. Scale: " << header.scale 
-                      << " | Orig Size: " << header.original_size << std::endl;
-
-            // Decrypt
+            
+            // 2. Security Gate
             if (header.compression_flags & 0x80) {
-                std::cout << "[SECURITY] Frame is Encrypted. Enter Key (Hex): ";
-                std::string hexKey;
-                std::cin >> hexKey;
                 uint8_t key[32];
-                parse_hex_key(hexKey, key);
+                if (!manual_key.empty()) {
+                    parse_hex_key(manual_key, key);
+                } else {
+                    std::cout << "[Rx] Encrypted Frame. Enter Key: ";
+                    std::string hexKey; std::cin >> hexKey;
+                    parse_hex_key(hexKey, key);
+                }
                 ChaCha20::process(payload, key, header.nonce);
             }
 
-            // Decompress
+            // 3. Decompression
             HuffmanCodec codec;
             std::vector<uint8_t> decompressed = codec.decompress(payload);
 
-            // Reconstruct
+            // 4. Reconstruction
             std::string timestamp = std::to_string(std::time(nullptr));
+            
             if (header.compression_flags & 0x02) {
+                // Vision Pipeline
                 GrayImage img(header.width, header.height);
-                dequantize(decompressed, img, header.scale);
+                dequantize(decompressed, img, header.scale); // 32-bit Restore
                 inverseTransform2D(img);
                 
                 std::string outName = "rx_" + timestamp + ".pgm";
                 savePGM(outName, img);
-                std::cout << "[Rx] Saved Image: " << outName << std::endl;
+                std::cout << "[Rx] Saved: " << outName << " (Scale: " << header.scale << ")" << std::endl;
             } else {
+                // Binary Pipeline
                 std::string outName = "rx_" + timestamp + ".bin";
                 std::ofstream out(outName, std::ios::binary);
                 out.write((const char*)decompressed.data(), decompressed.size());
-                std::cout << "[Rx] Saved File: " << outName << std::endl;
+                std::cout << "[Rx] Saved: " << outName << std::endl;
             }
-            std::cout << "[Network] Waiting for next frame..." << std::endl;
         }
         return 0;
     }
@@ -156,16 +169,17 @@ int main(int argc, char* argv[]) {
     //       COMPRESS / ENCRYPT / TX MODE
     // ==========================================
     if (!mode_unpack) {
-        // 1. Vision Pipeline
         std::vector<uint8_t> finalData;
         uint8_t compressionFlags = 0;
         uint64_t originalSize = 0;
         uint16_t width = 0, height = 0;
 
+        // 1. Pipeline Selection
         if (fs::path(arg1).extension() == ".pgm") {
             std::cout << "Processing PGM... Scale: " << scale << std::endl;
             GrayImage img(0, 0);
-            if (!loadPGM(arg1, img)) return 1;
+            if (!loadPGM(arg1, img)) { std::cerr << "PGM Load Error." << std::endl; return 1; }
+            
             originalSize = img.width * img.height;
             width = img.width; height = img.height;
             
@@ -187,7 +201,7 @@ int main(int argc, char* argv[]) {
             compressionFlags |= 0x01; 
         }
 
-        // 2. Prepare Header
+        // 2. Header Construction
         QuasarHeader header;
         std::memset(&header, 0, sizeof(header));
         std::memcpy(header.magic, "QSR1", 4);
@@ -196,27 +210,36 @@ int main(int argc, char* argv[]) {
         header.scale = scale;
         header.width = width; header.height = height;
 
-        // 3. Encrypt
+        // 3. Encryption
         if (do_encrypt) {
-            std::cout << "Encrypting..." << std::endl;
             uint8_t key[32], nonce[12];
             std::random_device rd;
-            for (auto& k : key) k = rd() & 0xFF;
+            
+            if (!manual_key.empty()) {
+                parse_hex_key(manual_key, key);
+            } else {
+                for (auto& k : key) k = rd() & 0xFF;
+            }
             for (auto& n : nonce) n = rd() & 0xFF;
-            print_hex("Generated Key", key, 32);
+            
+            if (manual_key.empty()) {
+                std::cout << "Encrypting..." << std::endl;
+                print_hex("Generated Key", key, 32);
+            }
+            
             std::memcpy(header.nonce, nonce, 12);
             header.compression_flags |= 0x80; 
             ChaCha20::process(finalData, key, nonce);
         }
 
-        // 4. Combine Header + Payload
+        // 4. Packaging
         std::vector<uint8_t> fullPacket(sizeof(header) + finalData.size());
         std::memcpy(fullPacket.data(), &header, sizeof(header));
         std::memcpy(fullPacket.data() + sizeof(header), finalData.data(), finalData.size());
 
-        // 5. Output (File or Network)
+        // 5. Output
         if (mode_tx) {
-            std::cout << "[Tx] Streaming to " << tx_ip << ":" << tx_port << "..." << std::endl;
+            std::cout << "[Tx] Streaming to " << tx_ip << ":" << tx_port << " (" << fullPacket.size() << " bytes)..." << std::endl;
             QuasarTx tx;
             tx.send_frame(fullPacket, tx_ip, tx_port);
         } else {
@@ -225,24 +248,28 @@ int main(int argc, char* argv[]) {
             out.write((const char*)fullPacket.data(), fullPacket.size());
             std::cout << "Saved: " << outputPath << std::endl;
         }
-    }
+    } 
     // ==========================================
     //               UNPACK MODE
     // ==========================================
     else {
-        // (Keep your existing Unpack logic here, or paste it back if it was lost)
-        // I will reproduce the Unpack logic here for completeness
+        std::cout << "Restoring " << arg1 << "..." << std::endl;
         std::ifstream in(arg1, std::ios::binary);
-        if (!in) return 1;
+        if (!in) { std::cerr << "File not found." << std::endl; return 1; }
 
         QuasarHeader header;
         in.read((char*)&header, sizeof(header));
         std::vector<uint8_t> payload((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 
         if (header.compression_flags & 0x80) {
-            std::cout << "Enter Key (Hex): ";
-            std::string hexKey; std::cin >> hexKey;
-            uint8_t key[32]; parse_hex_key(hexKey, key);
+            uint8_t key[32];
+            if (!manual_key.empty()) {
+                parse_hex_key(manual_key, key);
+            } else {
+                std::cout << "File is Encrypted. Enter Key (Hex): ";
+                std::string s; std::cin >> s;
+                parse_hex_key(s, key);
+            }
             ChaCha20::process(payload, key, header.nonce);
         }
 
@@ -254,11 +281,13 @@ int main(int argc, char* argv[]) {
             dequantize(decompressed, img, header.scale);
             inverseTransform2D(img);
             savePGM(arg1 + ".recovered.pgm", img);
+            std::cout << "Recovered: " << arg1 + ".recovered.pgm" << std::endl;
         } else {
-            std::ofstream out(arg1 + ".recovered", std::ios::binary);
+            std::string outName = arg1 + ".recovered";
+            std::ofstream out(outName, std::ios::binary);
             out.write((const char*)decompressed.data(), decompressed.size());
+            std::cout << "Recovered: " << outName << std::endl;
         }
-        std::cout << "Unpacked successfully." << std::endl;
     }
 
     return 0;

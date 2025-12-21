@@ -5,22 +5,73 @@
 #include <string>
 #include <cmath>
 
+#if defined(__AVX2__) || defined(_M_AMD64) || defined(_M_X64)
+#include <immintrin.h>
+#endif
+
+/**
+ * AVX2 Optimized Haar 1D Transform
+ * 
+ * Shuffle Logic (De-interleaving):
+ * We start with 8 floats in a YMM register: [a0, b0, a1, b1, a2, b2, a3, b3]
+ * We use _mm256_permutevar8x32_ps with indices [0, 2, 4, 6, 1, 3, 5, 7]
+ * This separates the vector into two 128-bit halves:
+ *   Low 128-bit:  [a0, a1, a2, a3] (Even pixels / A)
+ *   High 128-bit: [b0, b1, b2, b3] (Odd pixels / B)
+ * We then compute Avg = (A+B)*0.5 and Diff = (A-B) in parallel.
+ */
+#if defined(__AVX2__)
+void haar1D_AVX2(const std::vector<float>& line, std::vector<float>& temp, int h) {
+    int i = 0;
+    __m256i mask = _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7);
+    __m256 half = _mm256_set1_ps(0.5f);
+
+    for (; i <= h - 4; i += 4) {
+        // Load 8 floats (4 pairs)
+        __m256 v = _mm256_loadu_ps(&line[i * 2]);
+        
+        // De-interleave
+        __m256 perm = _mm256_permutevar8x32_ps(v, mask);
+        
+        // Extract evens and odds
+        __m128 evens = _mm256_extractf128_ps(perm, 0);
+        __m128 odds  = _mm256_extractf128_ps(perm, 1);
+        
+        // Math
+        __m128 avgs = _mm_mul_ps(_mm_add_ps(evens, odds), _mm_set1_ps(0.5f));
+        __m128 diffs = _mm_sub_ps(evens, odds);
+        
+        // Store
+        _mm_storeu_ps(&temp[i], avgs);
+        _mm_storeu_ps(&temp[h + i], diffs);
+    }
+    
+    // Tail handling
+    for (; i < h; ++i) {
+        float a = line[2 * i];
+        float b = line[2 * i + 1];
+        temp[i] = (a + b) / 2.0f;
+        temp[h + i] = (a - b);
+    }
+}
+#endif
+
 void haar1D(std::vector<float>& line, int size) {
     if (size < 2) return;
 
     std::vector<float> temp(size);
     int h = size / 2;
 
+#if defined(__AVX2__)
+    haar1D_AVX2(line, temp, h);
+#else
     for (int i = 0; i < h; ++i) {
         float a = line[2 * i];
         float b = line[2 * i + 1];
-
-        // Lifting scheme:
-        // Avg = (a + b) / 2
-        // Detail = a - b
-        temp[i] = (a + b) / 2.0f;     // Averages in the first half
-        temp[h + i] = (a - b);        // Details in the second half
+        temp[i] = (a + b) / 2.0f;
+        temp[h + i] = (a - b);
     }
+#endif
 
     // Copy back
     for (int i = 0; i < size; ++i) {

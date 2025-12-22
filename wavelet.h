@@ -2,8 +2,8 @@
 #define WAVELET_H
 #include <string>   
 #include <cstdint>
-
 #include <vector>
+#include "quasar_format.h"
 
 struct GrayImage {
     int width;
@@ -30,7 +30,7 @@ bool loadPGM(const std::string& path, GrayImage& img);
 bool savePGM(const std::string& path, const GrayImage& img);
 
 // Saliency filter: Nullifies coefficients outside a central radius
-void applySaliency(GrayImage& img, float radius);
+void applySaliency(GrayImage& img, const std::vector<ROI>& targets);
 
 // Quantization: Bridges float coefficients to 16-bit bit-packed data
 std::vector<uint8_t> quantize(const GrayImage& img, float scale);

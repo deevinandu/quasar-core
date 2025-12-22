@@ -191,17 +191,24 @@ bool savePGM(const std::string& path, const GrayImage& img) {
     return true;
 }
 
-void applySaliency(GrayImage& img, float radius) {
-    float cx = img.width / 2.0f;
-    float cy = img.height / 2.0f;
+void applySaliency(GrayImage& img, const std::vector<ROI>& targets) {
+    if (targets.empty()) return;
 
     for (int y = 0; y < img.height; ++y) {
         for (int x = 0; x < img.width; ++x) {
-            float dx = x - cx;
-            float dy = y - cy;
-            float dist = std::sqrt(dx * dx + dy * dy);
+            bool in_any_roi = false;
+            
+            // Check if this pixel is inside ANY of the target bubbles
+            for (const auto& roi : targets) {
+                float dx = (float)x - (float)roi.x;
+                float dy = (float)y - (float)roi.y;
+                if ((dx * dx + dy * dy) <= (float)roi.r * (float)roi.r) {
+                    in_any_roi = true;
+                    break; 
+                }
+            }
 
-            if (dist > radius) {
+            if (!in_any_roi) {
                 img.data[y * img.width + x] = 0.0f;
             }
         }

@@ -12,6 +12,12 @@
 #pragma pack(push, 1)
 #endif
 
+struct ROI {
+    uint16_t x;
+    uint16_t y;
+    uint16_t r;
+};
+
 struct 
 #ifndef _MSC_VER
 __attribute__((packed)) 
@@ -25,6 +31,16 @@ QuasarHeader {
     float scale;            // Quantization scale factor
     uint16_t width;   
     uint16_t height; 
+
+    float est_x;       // Drone Local X
+    float est_y;       // Drone Local Y
+    float est_z;       // Drone Altitude
+
+    uint32_t target_id;
+
+    // Multi-ROI Data
+    uint8_t roi_count;      // How many targets (0-8)
+    ROI targets[8];         // Static array of 8 target slots
 };
 
 #ifdef _MSC_VER
